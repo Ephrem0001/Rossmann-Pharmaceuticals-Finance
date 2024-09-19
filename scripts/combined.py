@@ -1,0 +1,426 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import chi2_contingency
+import holidays
+from statsmodels.tsa.seasonal import seasonal_decompose
+from scipy.stats import ttest_ind
+
+
+
+def visualize_promo_interval_distribution(df_Train, df_Test, promo_column='Promo', title='PromoInterval Distribution: Train vs Test'):
+    plt.figure(figsize=(10, 6))
+    # Plot for training set
+    sns.countplot(x=promo_column, data=df_Train, color='blue', alpha=0.6, label='Train')
+    # Plot for test set
+    sns.countplot(x=promo_column, data=df_Test, color='orange', alpha=0.6, label='Test')
+    
+    plt.title(title)
+    plt.xlabel(promo_column)
+    plt.ylabel('Count')
+    plt.legend()
+    plt.xticks(rotation=45)
+    plt.show()
+    
+    
+def chi_square_test(df_train, df_test, promo_column='Promo'):
+    # Create a contingency table for the specified promo column in both datasets
+    contingency_table = pd.crosstab(df_train[promo_column], df_test[promo_column])
+
+    # Perform the Chi-Square test
+    chi2, p_value, dof, expected = chi2_contingency(contingency_table)
+
+    # Output the results
+    print(f'Chi-Square Test Statistic: {chi2}')
+    print(f'p-value: {p_value}')
+    print("-------------------------------------------------------")
+
+    if p_value < 0.05:
+        print("The distributions are significantly different.")
+    else:
+        print("The distributions are not significantly different.")
+
+
+def categorize_and_plot_holiday_sales(df_train, holiday_col, days_before=3, days_after=3):
+    # Sort by Date
+    df_train.sort_values(by='Date', inplace=True)
+
+    # Create a function to categorize periods around holidays
+    def categorize_period(row, holiday_col):
+        if row[holiday_col] == '0':
+            return 'Normal'
+        else:
+            holiday_date = row['Date']
+            before = df_train['Date'] >= (holiday_date - pd.DateOffset(days=days_before))
+            after = df_train['Date'] <= (holiday_date + pd.DateOffset(days=days_after))
+            
+            # Determine period
+            if before.any():
+                return 'Before Holiday'
+            elif after.any():
+                return 'After Holiday'
+            else:
+                return 'During Holiday'
+
+    # Apply categorization
+    df_train['Period_' + holiday_col] = df_train.apply(lambda row: categorize_period(row, holiday_col), axis=1)
+
+    # Aggregate sales by holiday periods
+    holiday_sales = df_train.groupby('Period_' + holiday_col)['Sales'].mean()
+
+    # Plot the results
+    plt.figure(figsize=(7, 5))
+    holiday_sales.plot(kind='bar', color=['blue', 'red', 'green'], alpha=0.7)
+    plt.title(f'Sales Behavior Around {holiday_col} Periods')
+    plt.xlabel('Period')
+    plt.ylabel('Average Sales')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+
+# Function to initialize holiday data and add a holiday column
+def add_holiday_column(df_train, country='US'):
+    if country == 'US':
+        holiday_list = holidays.US(years=df_train.index.year.unique())
+    else:
+        raise ValueError(f"Holidays for {country} not implemented yet.")
+    
+    df_train['IsHoliday'] = df_train.index.isin(holiday_list)
+    return df_train
+
+# Function for time series decomposition
+def decompose_time_series(df_train, column='Sales', model='additive', period=365):
+    decomposition = seasonal_decompose(df_train[column], model=model, period=period)
+    df_train['Trend'] = decomposition.trend
+    df_train['Seasonal'] = decomposition.seasonal
+    return decomposition
+
+# Function to plot the decomposition results
+def plot_decomposition(decomposition, df_train):
+    plt.figure(figsize=(12, 8))
+
+    plt.subplot(3, 1, 1)
+    plt.plot(df_train['Sales'], label='Original Sales')
+    plt.title('Original Sales')
+
+    plt.subplot(3, 1, 2)
+    plt.plot(df_train['Trend'], label='Trend', color='orange')
+    plt.title('Trend Component')
+
+    plt.subplot(3, 1, 3)
+    plt.plot(df_train['Seasonal'], label='Seasonality', color='green')
+    plt.title('Seasonal Component')
+
+    plt.tight_layout()
+    plt.show()
+
+# Function to plot sales with moving average
+def plot_moving_average(df_train, window=30):
+    df_train['Sales_MA'] = df_train['Sales'].rolling(window=window).mean()
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(df_train.index, df_train['Sales'], label='Sales', alpha=0.5)
+    plt.plot(df_train.index, df_train['Sales_MA'], label=f'{window}-Day Moving Average', color='red', linewidth=2)
+    plt.title('Sales Trend with Moving Average')
+    plt.xlabel('Date')
+    plt.ylabel('Sales')
+    plt.legend()
+    plt.show()
+
+# Function to compare holiday vs non-holiday sales trends
+def compare_holiday_non_holiday_sales(df_train):
+    holiday_sales_trend = df_train[df_train['IsHoliday']]['Sales_MA']
+    non_holiday_sales_trend = df_train[~df_train['IsHoliday']]['Sales_MA']
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(holiday_sales_trend.index, holiday_sales_trend, label='Holiday Sales Trend', color='blue')
+    plt.plot(non_holiday_sales_trend.index, non_holiday_sales_trend, label='Non-Holiday Sales Trend', color='green', alpha=0.7)
+    plt.title('Holiday vs Non-Holiday Sales Trend')
+    plt.xlabel('Date')
+    plt.ylabel('Sales Moving Average')
+    plt.legend()
+    plt.show()
+
+
+def analyze_sales_customers_relationship(df_train):
+    # Calculate the correlation
+    correlation = df_train['Sales'].corr(df_train['Customers'])
+    print(f'Pearson correlation coefficient: {correlation}')
+
+    # Plot the relationship
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(x='Customers', y='Sales', data=df_train)
+    plt.title('Sales vs. Number of Customers')
+    plt.xlabel('Number of Customers')
+    plt.ylabel('Sales')
+    plt.show()
+
+
+def analyze_promotions(df_train):
+    # Create a column indicating if the date is during a promotion
+    df_train['DuringPromo'] = df_train['Promo'] == 1
+
+    # Compare sales during promotions vs non-promotions
+    promo_sales = df_train[df_train['DuringPromo']]['Sales']
+    non_promo_sales = df_train[~df_train['DuringPromo']]['Sales']
+
+    # Statistical test
+    t_stat, p_value = ttest_ind(promo_sales, non_promo_sales)
+    print(f'T-test statistic: {t_stat}, p-value: {p_value}')
+
+    # Plot sales with and without promotions
+    plt.figure(figsize=(12, 6))
+    sns.lineplot(data=df_train, x=df_train.index, y='Sales', hue='DuringPromo', palette={True: 'red', False: 'blue'})
+    plt.title('Sales During Promotions vs Non-Promotions')
+    plt.xlabel('Date')
+    plt.ylabel('Sales')
+    plt.legend(title='During Promo')
+    plt.show()
+
+    # Analyze new customers acquired during promotions
+    new_customers = df_train[df_train['DuringPromo']].groupby('Store').size()
+    print(f'Number of new customers during promotions: {len(new_customers)}')
+
+    # Analyze repeat purchase behavior of existing customers
+    existing_customers = df_train[df_train['Store'].isin(new_customers.index)]
+    existing_customers_before = existing_customers[existing_customers.index < df_train[df_train['DuringPromo']].index.min()]
+    existing_customers_during = existing_customers[existing_customers.index >= df_train[df_train['DuringPromo']].index.min()]
+
+    # Plot purchase frequency
+    plt.figure(figsize=(12, 6))
+    sns.histplot(existing_customers_before['Sales'], label='Before Promotion', color='blue', kde=True)
+    sns.histplot(existing_customers_during['Sales'], label='During Promotion', color='red', kde=True)
+    plt.title('Sales Frequency Before and During Promotions')
+    plt.xlabel('Sales')
+    plt.ylabel('Frequency')
+    plt.legend()
+    plt.show()
+
+
+def analyze_store_promotions(df_train):
+    # Aggregate sales and promotion impact by store
+    store_sales = df_train.groupby(['Store', 'Promo'])['Sales'].sum().unstack()
+    store_sales.columns = ['Non-Promo', 'Promo']
+
+    # Calculate percentage increase in sales due to promotions
+    store_sales['Increase'] = (store_sales['Promo'] - store_sales['Non-Promo']) / store_sales['Non-Promo'] * 100
+
+    # Plot sales impact by store
+    plt.figure(figsize=(14, 7))
+    sns.barplot(x=store_sales.index, y='Increase', data=store_sales)
+    plt.title('Percentage Increase in Sales Due to Promotions by Store')
+    plt.xlabel('Store')
+    plt.ylabel('Percentage Increase in Sales')
+    plt.xticks(rotation=90)
+    plt.show()
+
+    # Identify top stores for promotion deployment based on sales increase
+    top_stores = store_sales.sort_values(by='Increase', ascending=False).head(10)
+    print(f"Top stores for promotion deployment:\n{top_stores}")
+
+
+def analyze_open_store_trends(df_train):
+    # Filter out closed stores
+    open_stores = df_train[df_train['Open'] == 1]
+    closed_stores = df_train[df_train['Open'] == 0]
+
+    # Analyze sales and customer trends for open stores
+    open_store_sales = open_stores.groupby('Date')['Sales'].sum()
+    open_store_customers = open_stores.groupby('Date')['Customers'].sum()
+
+    # Plot Sales and Customers for open stores
+    plt.figure(figsize=(14, 6))
+
+    plt.subplot(2, 1, 1)
+    plt.plot(open_store_sales, label='Sales (Open Stores)', color='blue')
+    plt.title('Sales Trends During Open Store Days')
+    plt.ylabel('Total Sales')
+    plt.legend()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(open_store_customers, label='Customers (Open Stores)', color='green')
+    plt.title('Customer Trends During Open Store Days')
+    plt.ylabel('Total Customers')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+def analyze_weekday_open_stores_weekend_sales(df_train):
+    # Step 1: Identify stores open on all weekdays (Monday to Friday)
+    weekday_data = df_train[(df_train['DayOfWeek'].isin([1, 2, 3, 4, 5])) & (df_train['Open'] == 1)]
+
+    # Count how many weekdays each store is open
+    weekday_open_count = weekday_data.groupby('Store')['DayOfWeek'].nunique().reset_index()
+
+    # Select stores that are open on all 5 weekdays
+    stores_open_all_weekdays = weekday_open_count[weekday_open_count['DayOfWeek'] == 5]['Store'].tolist()
+
+    # Step 2: Analyze weekend sales for stores open on all weekdays
+    weekend_data = df_train[df_train['DayOfWeek'].isin([6, 7])]  # Saturday = 6, Sunday = 7
+
+    # Filter for stores that are open all weekdays
+    weekend_sales_for_weekday_stores = weekend_data[weekend_data['Store'].isin(stores_open_all_weekdays)]
+
+    # Calculate total weekend sales for these stores
+    weekend_sales_summary = weekend_sales_for_weekday_stores.groupby('Store')['Sales'].sum().reset_index()
+
+    # Print the results
+    print("Stores open on all weekdays and their weekend sales:")
+    print(weekend_sales_summary)
+
+
+def analyze_sales_customers_by_day(open_stores):
+    # Group by 'DayOfWeek' and calculate mean 'Sales' and 'Customers'
+    day_of_week_summary = open_stores.groupby('DayOfWeek').agg({'Sales': 'mean', 'Customers': 'mean'}).reset_index()
+
+    # Plot average sales and customer trends by day of the week
+    plt.figure(figsize=(10, 6))
+    plt.plot(day_of_week_summary['DayOfWeek'], day_of_week_summary['Sales'], 
+             marker='o', label='Average Sales', color='blue')
+    plt.plot(day_of_week_summary['DayOfWeek'], day_of_week_summary['Customers'], 
+             marker='o', label='Average Customers', color='green')
+
+    # Add title, labels, and legend
+    plt.title('Average Sales and Customer Trends by Day of the Week')
+    plt.xlabel('Day of the Week')
+    plt.ylabel('Average Value')
+    plt.legend()
+
+    # Set custom ticks for day labels
+    plt.xticks(ticks=range(1, 8), labels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+
+    # Enable grid for better readability
+    plt.grid(True)
+
+    # Show plot
+    plt.tight_layout()  # Adjust layout for better spacing
+    plt.show()
+
+
+def analyze_sales_by_day(open_stores):
+    day_of_week_summary = open_stores.groupby('DayOfWeek').agg({'Sales': 'mean', 'Customers': 'mean'}).reset_index()
+
+    # Plot the day of week behavior
+    plt.figure(figsize=(10, 6))
+    plt.plot(day_of_week_summary['DayOfWeek'], day_of_week_summary['Sales'], marker='o', label='Average Sales', color='blue')
+    plt.plot(day_of_week_summary['DayOfWeek'], day_of_week_summary['Customers'], marker='o', label='Average Customers', color='green')
+    plt.title('Average Sales and Customer Trends by Day of the Week')
+    plt.xlabel('Day of the Week')
+    plt.ylabel('Average Value')
+    plt.legend()
+    plt.xticks(ticks=range(1, 8), labels=['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+    plt.grid(True)
+    plt.show()
+
+
+def analyze_promo_impact(open_stores):
+    # Group by 'Promo' and calculate mean 'Sales' and 'Customers'
+    promo_analysis = open_stores.groupby('Promo').agg({'Sales': 'mean', 'Customers': 'mean'}).reset_index()
+
+    # Plot Average Sales with and without Promotions
+    plt.figure(figsize=(10, 6))
+    plt.bar(promo_analysis['Promo'], promo_analysis['Sales'], color=['blue', 'orange'], width=0.5)
+    plt.title('Average Sales with and without Promotions')
+    plt.xlabel('Promotion')
+    plt.ylabel('Average Sales')
+    plt.xticks(ticks=[0, 1], labels=['No Promo', 'Promo'])
+    plt.show()
+
+    # Plot Average Customer Count with and without Promotions
+    plt.figure(figsize=(10, 6))
+    plt.bar(promo_analysis['Promo'], promo_analysis['Customers'], color=['green', 'red'], width=0.5)
+    plt.title('Average Customer Count with and without Promotions')
+    plt.xlabel('Promotion')
+    plt.ylabel('Average Customers')
+    plt.xticks(ticks=[0, 1], labels=['No Promo', 'Promo'])
+    plt.show()
+
+
+def get_stores_open_all_weekdays(df):
+    # Define weekdays (1=Monday, 5=Friday)
+    weekdays = [1, 2, 3, 4, 5]  
+    # Filter for open stores
+    open_weekdays = df[df['Open'] == 1]
+    # Count unique weekdays for each store
+    stores_open_all_weekdays_group = open_weekdays[open_weekdays['DayOfWeek'].isin(weekdays)].groupby('Store')['DayOfWeek'].nunique()
+    # Get stores that are open all weekdays
+    stores_open_all_weekdays = stores_open_all_weekdays_group[stores_open_all_weekdays_group == len(weekdays)].index.tolist()
+    return stores_open_all_weekdays
+
+
+def compare_weekend_weekday_sales(df, stores_open_all_weekdays):
+    # Weekend mapping (6=Saturday, 7=Sunday)
+    weekends = [6, 7]
+    # Filter data for weekends (Saturday and Sunday)
+    weekend_sales = df[(df['DayOfWeek'].isin(weekends)) & (df['Store'].isin(stores_open_all_weekdays))]
+    weekend_sales_group = weekend_sales.groupby('Store')['Sales'].mean()
+    # Filter data for weekdays (Monday to Friday)
+    weekdays = [1, 2, 3, 4, 5]
+    weekday_sales = df[(df['DayOfWeek'].isin(weekdays)) & (df['Store'].isin(stores_open_all_weekdays))]
+    weekday_sales_group = weekday_sales.groupby('Store')['Sales'].mean()
+    # Combine the sales data into a single DataFrame
+    sales_comparison = pd.DataFrame({'Weekday Sales': weekday_sales_group, 'Weekend Sales': weekend_sales_group})
+    
+    # Fill missing values with 0 for comparison
+    sales_comparison.fillna(0, inplace=True)
+    
+    return sales_comparison
+
+
+def plot_sales_comparison(sales_comparison):
+    # Plot sales comparison for stores open all weekdays
+    sales_comparison.plot(kind='bar', figsize=(10, 6))
+    plt.title('Comparison of Weekday and Weekend Sales for Stores Open on All Weekdays')
+    plt.xlabel('Store')
+    plt.ylabel('Average Sales')
+    plt.xticks(rotation=45)
+    plt.legend(['Weekday Sales', 'Weekend Sales'])
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_average_sales_by_assortment(sales_by_assortment):
+    sales_by_assortment.plot(kind='bar', figsize=(8, 6), color='skyblue')
+    plt.title('Average Sales by Assortment Type')
+    plt.xlabel('Assortment Type')
+    plt.ylabel('Average Sales')
+    plt.xticks(rotation=0)
+    plt.tight_layout()
+    plt.show()
+
+
+def analyze_competition_distance(df):
+    # Calculate the correlation
+    correlation = df['CompetitionDistance'].corr(df['Sales'])
+    print(f"Correlation between CompetitionDistance and Sales: {correlation}")
+
+    # Plot Competition Distance vs Sales
+    plt.figure(figsize=(10, 6))
+    plt.scatter(df['CompetitionDistance'], df['Sales'], alpha=0.3)
+    plt.title('Sales vs Competition Distance')
+    plt.xlabel('Competition Distance (meters)')
+    plt.ylabel('Sales')
+    plt.grid(True)
+    plt.show()
+
+
+def analyze_city_center_sales(df):
+    # Filter for city center stores
+    city_center_stores = df[df['StoreType'] == 'c']
+    
+    # Check the correlation
+    correlation = city_center_stores['CompetitionDistance'].corr(city_center_stores['Sales'])
+    print(f"Correlation between CompetitionDistance and Sales in city centers: {correlation}")
+
+    # Plot Sales vs Competition Distance for city center stores
+    plt.figure(figsize=(10, 6))
+    plt.scatter(city_center_stores['CompetitionDistance'], city_center_stores['Sales'], alpha=0.3, color='green')
+    plt.title('Sales vs Competition Distance in City Centers')
+    plt.xlabel('Competition Distance (meters)')
+    plt.ylabel('Sales')
+    plt.grid(True)
+    plt.show()
+
