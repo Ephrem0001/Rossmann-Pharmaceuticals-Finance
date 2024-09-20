@@ -5,11 +5,26 @@ from scipy.stats import chi2_contingency
 import holidays
 from statsmodels.tsa.seasonal import seasonal_decompose
 from scipy.stats import ttest_ind
+import os
 import logging
 
+# Define the log directory
+log_dir = r'c:\Users\ephre\Documents\Rossmann-Pharmaceuticals-Finance-1\Logs'
+
+# Create the log directory if it doesn't exist
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    filename=os.path.join(log_dir, 'combined.log'),
+    filemode='a',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 logger = logging.getLogger(__name__)
+
 
 def visualize_promo_interval_distribution(df_Train, df_Test, promo_column='Promo', title='PromoInterval Distribution: Train vs Test'):
     logger.info("Starting visualization of promo interval distribution...")
