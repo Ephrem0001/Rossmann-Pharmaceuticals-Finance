@@ -5,6 +5,7 @@ from scipy.stats import chi2_contingency
 import holidays
 from statsmodels.tsa.seasonal import seasonal_decompose
 from scipy.stats import ttest_ind
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 import os
 import logging
 
@@ -18,7 +19,7 @@ if not os.path.exists(log_dir):
 # Configure logging
 logging.basicConfig(
     filename=os.path.join(log_dir, 'combined.log'),
-    filemode='a',
+    filemode='w',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
@@ -565,3 +566,82 @@ def analyze_competitor_impact(df):
     else:
         logging.info('No stores were found that transitioned from NA to valid competitor distances.')
         return None
+
+def create_features(df):    
+    # Ensure 'Date' is in datetime format
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Create new features
+    logging.info("Creating 'Month' feature")
+    df['Month'] = df['Date'].dt.month
+
+    logging.info("Creating 'WeekOfYear' feature")
+    df['WeekOfYear'] = df['Date'].dt.isocalendar().week
+
+    logging.info("Creating 'DayOfMonth' feature")
+    df['DayOfMonth'] = df['Date'].dt.day
+
+    logging.info("Creating 'IsWeekend' feature based on 'DayOfWeek'")
+    df['IsWeekend'] = df['DayOfWeek'].isin([6, 7])
+
+    logging.info("Creating 'HolidayImpact' feature")
+    df['HolidayImpact'] = (df['StateHoliday'] != '0') | (df['SchoolHoliday'] == 1) | df['IsHoliday']
+
+    logging.info("Creating 'Sales_Lag_1' feature")
+    df['Sales_Lag_1'] = df['Sales'].shift(1)
+
+    logging.info("Creating 'Sales_Lag_7' feature")
+    df['Sales_Lag_7'] = df['Sales'].shift(7)
+
+    logging.info("Creating 'PromoDuration' feature by cumulative sum of 'Promo'")
+    df['PromoDuration'] = df.groupby('Store')['Promo'].cumsum()
+
+    logging.info("Creating 'PromoEffectiveness' feature")
+    df['PromoEffectiveness'] = df['Sales'] / df['Promo'].replace(0, 1)  # Avoid division by zero
+
+    logging.info("Creating 'SalesPerCustomer' feature")
+    df['SalesPerCustomer'] = df['Sales'] / df['Customers']
+
+    logging.info("Creating 'Customer_Lag_1' feature")
+    df['Customer_Lag_1'] = df['Customers'].shift(1)
+
+    logging.info("Creating 'Customer_Lag_7' feature")
+    df['Customer_Lag_7'] = df['Customers'].shift(7)
+
+    logging.info("Creating 'CompetitorDistanceInteraction' feature")
+    df['CompetitorDistanceInteraction'] = df['Sales'] / df['CompetitionDistance'].replace(0, 1)  # Avoid division by zero
+    
+    return df
+
+def Scaler(data, columns_scaler):          
+    logging.info("Starting the scaling process.")
+    
+    Standard = StandardScaler()
+    df_standard = data.copy()
+    
+    try:
+        # Fit and transform the specified columns
+        df_standard[columns_scaler] = Standard.fit_transform(df_standard[columns_scaler])
+        logging.info("Scaling completed successfully.")
+    except Exception as e:
+        logging.error(f"An error occurred during scaling: {e}")
+        raise  # Re-raise the exception after logging
+
+    return df_standard
+
+def labelEncoder(dataframe, columns_label):
+    logging.info("Starting label encoding.")
+    
+    df_lbl = dataframe.copy()
+    
+    for col in columns_label:
+        if col in df_lbl.columns:
+            logging.info(f"Encoding column: {col}")
+            label = LabelEncoder()
+            label.fit(list(dataframe[col].values))
+            df_lbl[col] = label.transform(df_lbl[col].values)
+        else:
+            logging.warning(f"Column {col} not found in the DataFrame.")
+    
+    logging.info("Label encoding completed.")
+    return df_lbl
